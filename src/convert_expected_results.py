@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-input_path = Path("../expected_results/01_temperature_converter_results.txt")
-output_path = Path("../expected_results/01_temperature_converter_results.json")
+input_path = Path("../expected_results/02_gcd_lcm_results.txt")
+output_path = Path("../expected_results/02_gcd_lcm_results.json")
 
 items = []
 with input_path.open("r", encoding="utf-8") as f:

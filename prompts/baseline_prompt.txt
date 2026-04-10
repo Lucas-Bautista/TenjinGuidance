@@ -8,10 +8,9 @@ For each primitive variable found, return a JSON array of objects with exactly t
 Rules:
 
 Count every mention of the identifier that refers to that variable (declaration, assignment, usage in expressions, function arguments, return statements).
-If the same name is re-declared in a different scope, treat each scope's version as a separate entry and append the scope (e.g., "name": "x (inner loop)").
+If the same name is re-declared in a different function, treat each function's version as a separate entry and append the function (e.g., "name": "(function_name):(variable_name)").
 If a variable's type is inferred (e.g., auto, var, let), deduce the underlying primitive type from context.
 If the type cannot be determined, set "type" to "unknown".
 Return only the JSON array — no commentary, no markdown fencing.
-Order the entries in the JSON array by each variable's first appearance (line number, top to bottom) in the code.
 
 {{CODE}}
