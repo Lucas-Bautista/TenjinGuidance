@@ -1,0 +1,6 @@
+/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/004_nineality_sieve/test_case
+/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/006_static_alias/test_case
+/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/007_errno_pow/test_case
+/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/008_long_run/test_case
+/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/009_stack_buffer_overflow/test_case
+/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/010_integer_overflow/test_case

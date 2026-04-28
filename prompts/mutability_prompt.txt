@@ -1,0 +1,16 @@
+You are given a C source file containing full function bodies, and a JSON object listing variables with their types and the number of times each appears in the code.
+Analyze the C code to determine whether each variable would need to be declared as mut (mutable) if the code were translated to Rust.
+A variable should be marked true (mutable) if any of the following apply:
+
+It is reassigned after its initial declaration/initialization.
+It is modified in place (e.g., x++, x += 1, struct field mutation).
+Its address is taken and passed to a function that may modify it (e.g., some_function(&x)).
+It is passed as a non-const pointer to another function.
+
+A variable should be marked false (immutable) if:
+
+It is only read after initialization.
+It is declared with a const qualifier.
+It is assigned once and never modified or passed by mutable reference.
+
+Respond with only a JSON object where each key is the variable name (as a string) and each value is a boolean — true if the variable needs mut, false otherwise. Do not include any explanation, commentary, or markdown formatting. Output raw JSON only.
