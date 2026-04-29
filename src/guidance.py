@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
-from variable_counts import count_variables 
+from variable_counts import count_variables, function_return_types, variable_dataflow_sites
 from prompt import prompt
 import subprocess
 
@@ -36,7 +36,7 @@ def _iter_c_files(root: Path) -> Iterable[Path]:
         yield from root.rglob("*.c")
 
 
-def _run_10j_translate(codebase: Path, resultsdir: Path, guidance: str) -> None:
+def _run_10j_translate(codebase: Path, resultsdir: Path, guidance: str | None) -> None:
     """
     Runs:
       10j translate --codebase <codebase> --resultsdir <resultsdir>
@@ -56,6 +56,21 @@ def _run_10j_translate(codebase: Path, resultsdir: Path, guidance: str) -> None:
     print(f"Running command: {' '.join(cmd)}")
     # check=True -> raises CalledProcessError if 10j fails
     subprocess.run(cmd, check=True, cwd=Path("/Users/lucasbautista/Documents/UROP/tenjin/cli"))
+
+
+def _cargo_check(project_dir: Path) -> tuple[bool, str]:
+    """
+    Runs `cargo check` in project_dir.
+    Returns (ok, combined_output).
+    """
+    proc = subprocess.run(
+        ["cargo", "check"],
+        cwd=project_dir,
+        text=True,
+        capture_output=True,
+    )
+    output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    return proc.returncode == 0, output
 
 # def _as_counter(result: Any) -> Counter:
 #     """
@@ -162,6 +177,8 @@ def main() -> int:
         for c_file in _iter_c_files(root):
             try:
                 counts = count_variables(c_file)
+                fn_return_c_types = function_return_types(c_file)
+                vdf: dict[str, Any] = variable_dataflow_sites(c_file)
             except Exception as e:
                 print(f"[error] {c_file}: {e}")
                 continue
@@ -177,6 +194,8 @@ def main() -> int:
                         "distinct_keys": int(len(counts)),
                         "total_occurrences": int(sum(counts.values())),
                         "counts": entries,
+                        "fn_return_c_types": fn_return_c_types,
+                        "variable_dataflow": vdf,
                     }
                 )
             else:
@@ -195,7 +214,9 @@ def main() -> int:
     #   "counts": [
     #       {"key": "(function, variable, type)", "count": 10},
     #       ...
-    #   ]
+    #   ],
+    #   "fn_return_c_types": { "function_name": "c_return_type_spelling", ... }
+    #   "variable_dataflow": { "func:var" | "GLOBAL:var": { "c_type": str, "sites": [ { "line", "role" }, ... ] } }
     # Prompt used to get the corresponding Rust types for each variable, based on the variable counts JSON that we got from count_variables. We will also have a second prompt to get the mutability of each variable, since that is also important guidance for tenjin.
     type_prompt_path = Path("../prompts/guidance_prompt.txt")
 
@@ -203,6 +224,8 @@ def main() -> int:
     # This is separate from the type_prompt because we want to keep the guidance as modular as possible, so that we can easily add new types of guidance in the future without having to change the existing prompts or the way we call them. For example, if we wanted to add a prompt that asks about 
     # variable lifetimes, we could just create a new lifetime_prompt.txt and call prompt() with that new prompt and the same counts JSON.
     mut_prompt_path = Path("../prompts/mutability_prompt.txt")
+    # Maps each function to a Rust return type (Tenjin key `fn_return_type`), from C return spellings in `fn_return_c_types`.
+    fn_return_type_prompt_path = Path("../prompts/fn_return_type_prompt.txt")
 
     # If --json is not provided, then json_out will be empty and this loop will do nothing, which is fine because the LLM prompting relies on the JSON output to provide it with the variable counts guidance.
    
@@ -210,7 +233,10 @@ def main() -> int:
     for file_num, program_info in enumerate(json_out):
         code_sample_path = Path(program_info["file"])
         json_counts = program_info["counts"]  # This is the list of {"key":..., "count":...} dicts
+        fn_return_c_types: dict[str, str] = program_info.get("fn_return_c_types", {})
+        vdf: dict[str, Any] = program_info.get("variable_dataflow", {})
         # (function, variable, type) is the key, count is the value. We want to pass this information to the LLM so it can use it as guidance for its Rust type inference.
+        # variable_dataflow adds per-variable line/role sites (def/ref) for dataflow-consistent type guidance.
 
         local_variable_counts = []
         global_variable_counts = []
@@ -220,75 +246,142 @@ def main() -> int:
             count = entry["count"]
             function, variable_name, variable_type = eval(entry["key"])
             if function == "GLOBAL":
-                global_variable_counts.append({
+                dkey = f"GLOBAL:{variable_name}"
+                row: dict[str, Any] = {
                     "variable_name": variable_name,
                     "type": variable_type,
-                    "count": count
-                })
+                    "count": count,
+                }
             else:
-                local_variable_counts.append({
-                    "variable_name": f"{function}:{variable_name}",
+                dkey = f"{function}:{variable_name}"
+                row = {
+                    "variable_name": dkey,
                     "type": variable_type,
-                    "count": count
-                })
+                    "count": count,
+                }
+            sites = (vdf.get(dkey) or {}).get("sites")
+            if sites is not None:
+                row["dataflow_sites"] = sites
+            if function == "GLOBAL":
+                global_variable_counts.append(row)
+            else:
+                local_variable_counts.append(row)
 
         print(f"local variable Counts {local_variable_counts}")
-        local_variable_counts_str = json.dumps(local_variable_counts, indent=2, sort_keys=False)
-        global_variable_counts_str = json.dumps(global_variable_counts, indent=2, sort_keys=False)
 
-        # We are going to pass in the code that we want to get the Rust types from, the prompt that tells the LLM how to format its response, and the JSON data that has the variable counts for that code, a
-        # and we want the LLM to respond with a list of variable names, their types, and their counts, which we will then parse and use as guidance for tenjin.
-        local_variable_responses = prompt(code_sample_path, type_prompt_path, local_variable_counts_str)
-        global_variable_responses = prompt(code_sample_path, type_prompt_path, global_variable_counts_str)
-        is_mutable_responses = prompt(code_sample_path, mut_prompt_path, local_variable_counts_str)  # we can reuse the same counts JSON for this second prompt, since it also just asks about variable mutability
+        compile_errors: str | None = None
+        for attempt in range(1, 4):
+            local_variable_counts_str = json.dumps(local_variable_counts, indent=2, sort_keys=False)
+            global_variable_counts_str = json.dumps(global_variable_counts, indent=2, sort_keys=False)
 
-        print(f"Local Variable Counts for {code_sample_path}:\n{local_variable_counts}\n\n")
-        print(f"Global Variable Counts for {code_sample_path}:\n{global_variable_counts}\n\n")
-        print(f"Mutablility Responses for {code_sample_path}:\n{is_mutable_responses}\n\n")
+            # We are going to pass in the code that we want to get the Rust types from, the prompt that tells the LLM how to format its response, and the JSON data that has the variable counts for that code,
+            # and we want the LLM to respond with a list of variable names, their types, and their counts, which we will then parse and use as guidance for tenjin.
+            local_variable_responses = prompt(
+                code_sample_path,
+                type_prompt_path,
+                local_variable_counts_str,
+                compile_errors,
+            )
+            global_variable_responses = prompt(
+                code_sample_path,
+                type_prompt_path,
+                global_variable_counts_str,
+                compile_errors,
+            )
+            is_mutable_responses = prompt(
+                code_sample_path,
+                mut_prompt_path,
+                local_variable_counts_str,
+                compile_errors,
+            )  # we can reuse the same counts JSON for this second prompt, since it also just asks about variable mutability
 
-
-        # TODO: THIS ONLY WORKS BECAUSE WE ARE DEALING WITH A SINGULAR MODEL, OTHERWISE WE WOULD NEED TO MATCH THE RESPONSES TO THE MODELS. WE CAN ADD THIS LATER IF WE WANT TO RUN MULTIPLE MODELS.
-        for model, response in local_variable_responses:
-            print("response:", response, "\n\n")
-            vars_of_type = {}  # This is the dict we will eventually pass to tenjin as guidance, after we populate it with the LLM's responses
-            for variable, rust_type in response.items():
-                # print(f"Model {model} guessed variable {variable} has Rust type {rust_type}\n")
-                if vars_of_type.get(str(rust_type)) is not None:
-                    existing = vars_of_type[str(rust_type)]
-                    if type(existing) == list:
-                        existing.append(variable)
-                    else:
-                        vars_of_type[str(rust_type)] = [existing, variable]
+            fn_return_c_json = json.dumps(fn_return_c_types, indent=2, sort_keys=False)
+            if fn_return_c_types:
+                fn_return_type_responses = prompt(
+                    code_sample_path,
+                    fn_return_type_prompt_path,
+                    fn_return_c_json,
+                    compile_errors,
+                    data_heading="Function return types (C, from clang)",
+                    json_key="fn_return_c_types",
+                )
+                _raw = fn_return_type_responses[0][1]
+                if isinstance(_raw, dict):
+                    fn_return_type: dict[str, str] = {str(k): str(v) for k, v in _raw.items()}
                 else:
-                    vars_of_type[str(rust_type)] = variable      
-            print(f"Guidance dict so far: {vars_of_type}\n\n")
+                    print(
+                        f"[warn] {code_sample_path}: expected JSON object for fn_return_type, got {type(_raw).__name__}; using empty dict"
+                    )
+                    fn_return_type = {}
+            else:
+                fn_return_type = {}
 
-        for model, response in global_variable_responses:
-            print("response:", response, "\n\n")
-            declspecs_of_type = {}  # This is the dict we will eventually pass to tenjin as guidance, after we populate it with the LLM's responses
-            for variable, rust_type in response.items():
-                # print(f"Model {model} guessed variable {variable} has Rust type {rust_type}\n")
-                if declspecs_of_type.get(str(rust_type)) is not None:
-                    existing = declspecs_of_type[str(rust_type)]
-                    if type(existing) == list:
-                        existing.append(variable)
+            print(f"Local Variable Counts for {code_sample_path}:\n{local_variable_counts}\n\n")
+            print(f"Global Variable Counts for {code_sample_path}:\n{global_variable_counts}\n\n")
+            print(f"Mutablility Responses for {code_sample_path}:\n{is_mutable_responses}\n\n")
+            print(f"fn_return_type (Rust) for {code_sample_path}:\n{fn_return_type}\n\n")
+
+
+            # TODO: THIS ONLY WORKS BECAUSE WE ARE DEALING WITH A SINGULAR MODEL, OTHERWISE WE WOULD NEED TO MATCH THE RESPONSES TO THE MODELS. WE CAN ADD THIS LATER IF WE WANT TO RUN MULTIPLE MODELS.
+            for model, response in local_variable_responses:
+                print("response:", response, "\n\n")
+                vars_of_type = {}  # This is the dict we will eventually pass to tenjin as guidance, after we populate it with the LLM's responses
+                for variable, rust_type in response.items():
+                    # print(f"Model {model} guessed variable {variable} has Rust type {rust_type}\n")
+                    if vars_of_type.get(str(rust_type)) is not None:
+                        existing = vars_of_type[str(rust_type)]
+                        if type(existing) == list:
+                            existing.append(variable)
+                        else:
+                            vars_of_type[str(rust_type)] = [existing, variable]
                     else:
-                        declspecs_of_type[str(rust_type)] = [existing, variable]
-                else:
-                    declspecs_of_type[str(rust_type)] = variable      
-            print(f"Declspecs dict so far: {declspecs_of_type}\n\n")
+                        vars_of_type[str(rust_type)] = variable      
+                print(f"Guidance dict so far: {vars_of_type}\n\n")
+
+            for model, response in global_variable_responses:
+                print("response:", response, "\n\n")
+                declspecs_of_type = {}  # This is the dict we will eventually pass to tenjin as guidance, after we populate it with the LLM's responses
+                for variable, rust_type in response.items():
+                    # print(f"Model {model} guessed variable {variable} has Rust type {rust_type}\n")
+                    if declspecs_of_type.get(str(rust_type)) is not None:
+                        existing = declspecs_of_type[str(rust_type)]
+                        if type(existing) == list:
+                            existing.append(variable)
+                        else:
+                            declspecs_of_type[str(rust_type)] = [existing, variable]
+                    else:
+                        declspecs_of_type[str(rust_type)] = variable      
+                print(f"Declspecs dict so far: {declspecs_of_type}\n\n")
 
 
-        guidance = {
-            "vars_of_type": vars_of_type,
-            "declspecs_of_type": declspecs_of_type,
-            "vars_mut": is_mutable_responses[0][1]  # again, this only works because we are dealing with a singular model. If we had multiple models, we would need to match the mutability responses to the correct model and incorporate that into the guidance dict in a way that tenjin can understand.
-        }
+            guidance = {
+                "vars_of_type": vars_of_type,
+                "declspecs_of_type": declspecs_of_type,
+                "vars_mut": is_mutable_responses[0][1],  # again, this only works because we are dealing with a singular model. If we had multiple models, we would need to match the mutability responses to the correct model and incorporate that into the guidance dict in a way that tenjin can understand.
+                "fn_return_type": fn_return_type,
+            }
 
-        print(f"Final guidance dict for {code_sample_path}:\n{json.dumps(guidance, indent=2, sort_keys=False)}\n\n")
+            print(f"Final guidance dict for {code_sample_path}:\n{json.dumps(guidance, indent=2, sort_keys=False)}\n\n")
 
-        # This function wil run tenjin with the provided guidance (the variable counts and the LLM's inferred Rust types based on those counts), and save the results in a separate directory for each file.
-        _run_10j_translate(program_info["file"], Path(f"/Users/lucasbautista/Documents/UROP/Tractor/tenjin_results/file_{file_num}"), json.dumps(guidance, indent=2, sort_keys=False))
+            # This function wil run tenjin with the provided guidance (the variable counts and the LLM's inferred Rust types based on those counts), and save the results in a separate directory for each file.
+            results_dir = Path(f"/Users/lucasbautista/Documents/UROP/Tractor/tenjin_results/file_{file_num}_attempt_{attempt}")
+            _run_10j_translate(program_info["file"], results_dir, json.dumps(guidance, indent=2, sort_keys=False))
+
+            cargo_dir = results_dir / "final" / "main"
+            if not cargo_dir.exists():
+                compile_errors = f"cargo directory not found: {cargo_dir}"
+                print(f"[attempt {attempt}] {compile_errors}")
+                continue
+
+            ok, output = _cargo_check(cargo_dir)
+            if ok:
+                print(f"[attempt {attempt}] cargo check OK for {cargo_dir}")
+                break
+
+            compile_errors = output
+            print(f"[attempt {attempt}] cargo check failed for {cargo_dir}\n{output}")
+        else:
+            print(f"[give up] cargo check failed after 3 attempts for {code_sample_path}")
 
         # vars_of_type_tenjin_json = json.dumps(vars_of_type, indent=2, sort_keys=False)
         # declspecs_of_type_tenjin_json = json.dumps(declspecs_of_type, indent=2, sort_keys=False)
@@ -298,8 +391,10 @@ def main() -> int:
     '''
     10j translate has an optional parameter called --guidance. It can be either a JSON literal or a filepath, whose contents should be a JSON object. The following keys are available:
 
-    vars_of_type - a dict with keys as serialized Rust type strings. The value for each key is either a variable specifier, or a list of specifiers. A variable specifier is a string like 
+    vars_of_type - a dict with keys as serialized Rust type strings. The value for each key is either a variable specifier, or a list of specifiers. A variable specifier is a string like
     foo:bar, which indicates the bar parameter or local variable within the foo function.
+
+    fn_return_type - function name to Rust return type (syn syntax); from the LLM; consumed by tenjin.
     '''
 
     return 0

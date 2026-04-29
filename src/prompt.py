@@ -7,6 +7,9 @@ from variable_counts import count_variables
 import json
 from pathlib import Path
 from dotenv import load_dotenv
+
+_TRACTOR_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_TRACTOR_ROOT / ".env")
 load_dotenv()
 
 # code_sample_path = Path("../c_samples/02_gcd_lcm.c")
@@ -30,19 +33,29 @@ def clean_json_response(text: str) -> str:
 
     return t
 
-def prompt(code_path: Path, prompt_path: Path, json_input: str | None) -> list[tuple[str, dict]]:
+def prompt(
+    code_path: Path,
+    prompt_path: Path,
+    json_input: str | None,
+    compile_errors: str | None = None,
+    *,
+    data_heading: str = "Variables",
+    json_key: str = "counts",
+) -> list[tuple[str, dict]]:
     # Load prompt as string
     system_prompt = prompt_path.read_text(encoding="utf-8")
-    user_prompt = """Source code:
-                    {{CODE}}
-
-                    Variables:
-                    {
-                    "counts": {{JSON}}
-                    }"""
-
     code = code_path.read_text(encoding="utf-8")
-    user_prompt = user_prompt.replace("{{CODE}}", code).replace("{{JSON}}", json_input or "null")
+    json_part = json_input if json_input is not None else "null"
+    user_prompt = f"""Source code:
+                    {code}
+
+                    {data_heading}:
+                    {{
+                    {json.dumps(json_key)}: {json_part}
+                    }}
+
+                    Compiler errors from previous translation attempt:
+                    {compile_errors or ""}"""
 
     # See how accurate the model is by comparing its response to expected results
     messages = []
@@ -85,11 +98,12 @@ def prompt(code_path: Path, prompt_path: Path, json_input: str | None) -> list[t
         organized_responses.append((model, data))
     return organized_responses
 
+
 def evaluate():
     # Declare prompt, code sample, and json
     code_sample_path = Path("../c_samples/02_gcd_lcm.c")
     prompt_path = Path("../prompts/baseline_prompt.txt")
-    responses = prompt(code_sample_path, prompt_path, None)
+    responses = prompt(code_sample_path, prompt_path, None, None)
     expected_results = count_variables("../c_samples/02_gcd_lcm.c")
     
 

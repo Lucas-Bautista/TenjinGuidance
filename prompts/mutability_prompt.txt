@@ -1,4 +1,4 @@
-You are given a C source file containing full function bodies, and a JSON object listing variables with their types and the number of times each appears in the code.
+You are given a C source file containing full function bodies, and a JSON object listing variables with their types, the number of times each appears, and optionally "dataflow_sites" with line/role (decl, param, read, write) for that variable. That dataflow is a hint for where the value is introduced vs read vs reassigned.
 Analyze the C code to determine whether each variable would need to be declared as mut (mutable) if the code were translated to Rust.
 A variable should be marked true (mutable) if any of the following apply:
 
@@ -13,4 +13,9 @@ It is only read after initialization.
 It is declared with a const qualifier.
 It is assigned once and never modified or passed by mutable reference.
 
+“write” in dataflow_sites means a direct assignment left-hand side; that strongly suggests mut true unless the binding is a one-time `let` with no later writes.
+
+If compiler errors from a previous attempt appear in the user message, still answer mutability based on the C program; do not invent types.
+
 Respond with only a JSON object where each key is the variable name (as a string) and each value is a boolean — true if the variable needs mut, false otherwise. Do not include any explanation, commentary, or markdown formatting. Output raw JSON only.
+UNDER NO CIRCUMSTANCE WILL YOU GIVE EXTRA COMMENTARY. ONLY JSON

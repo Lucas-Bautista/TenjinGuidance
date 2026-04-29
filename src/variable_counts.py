@@ -1,10 +1,10 @@
 import subprocess
+from collections import Counter, defaultdict
 from pathlib import Path
-from collections import Counter
+from typing import Any
 from clang.cindex import Config
 Config.set_library_path("/opt/homebrew/opt/llvm/lib")
 from clang.cindex import Index, CursorKind, Cursor
-from collections import Counter
 
 
     
@@ -26,6 +26,141 @@ def _enclosing_function_name(cur: Cursor) -> str:
             return "GLOBAL"
         p = p.semantic_parent
     return "GLOBAL"
+
+
+def _var_key_for_decl(func: str, name: str) -> str:
+    if func == "GLOBAL":
+        return f"GLOBAL:{name}"
+    return f"{func}:{name}"
+
+
+def _decl_ref_is_assign_lhs(node: Cursor, parent: Cursor | None) -> bool:
+    """
+    True if this DECL_REF is the direct left-hand side of a straight/compound assignment.
+
+    libclang often leaves semantic_parent/lexical_parent unset for expression nodes, so we
+    pass the immediate parent from the recursive walk.
+    """
+    p = parent
+    if p is None or p.kind not in (
+        CursorKind.BINARY_OPERATOR,
+        CursorKind.COMPOUND_ASSIGNMENT_OPERATOR,
+    ):
+        return False
+    try:
+        bo = p.binary_operator
+    except Exception:
+        return False
+    if not bo or not bo.is_assignment:
+        return False
+    ch = list(p.get_children())
+    if not ch:
+        return False
+    return ch[0] == node
+
+
+def variable_dataflow_sites(filename: str) -> dict[str, Any]:
+    """
+    Per-variable def/ref lines in the main translation unit, keyed like guidance:
+    GLOBAL:x for file scope, f:x for locals/params in function f.
+
+    Each entry is {"c_type": str, "sites": [{"line", "role"}, ...]} with roles
+    decl, param, read, write (write = lhs of = or += style assignment; uses AST parent
+    because libclang often omits semantic_parent on DECL_REF_EXPR).
+    """
+    index = Index.create()
+    args = ["-x", "c", "-std=c11", *_sdk_args()]
+    tu = index.parse(filename, args=args)
+    if tu.diagnostics:
+        print("=== clang diagnostics ===")
+        for d in tu.diagnostics:
+            print(d)
+        print("=========================")
+
+    main_file = Path(tu.spelling).resolve()
+    site_lists: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    c_types: dict[str, str] = {}
+
+    def in_main_file(cur: Cursor) -> bool:
+        if not cur.location.file:
+            return False
+        try:
+            return Path(cur.location.file.name).resolve() == main_file
+        except OSError:
+            return False
+
+    def visit(node: Cursor, parent: Cursor | None = None) -> None:
+        if node.kind == CursorKind.VAR_DECL and in_main_file(node):
+            n = (node.spelling or "").strip()
+            if not n:
+                return
+            func = _enclosing_function_name(node)
+            k = _var_key_for_decl(func, n)
+            line = int(node.location.line)
+            site_lists[k].append({"line": line, "role": "decl"})
+            c_types[k] = node.type.spelling
+        elif node.kind == CursorKind.PARM_DECL and in_main_file(node):
+            p = node.semantic_parent
+            if p is not None and p.kind == CursorKind.FUNCTION_DECL and not p.is_definition():
+                return
+            n = (node.spelling or "").strip()
+            if not n:
+                return
+            if p is not None and p.kind == CursorKind.FUNCTION_DECL:
+                func = p.spelling or "<anonymous>"
+            else:
+                func = _enclosing_function_name(node)
+            k = _var_key_for_decl(func, n)
+            site_lists[k].append(
+                {"line": int(node.location.line), "role": "param"}
+            )
+            c_types[k] = node.type.spelling
+        elif node.kind == CursorKind.DECL_REF_EXPR:
+            ref = node.referenced
+            if not ref or ref.kind not in (
+                CursorKind.VAR_DECL,
+                CursorKind.PARM_DECL,
+            ):
+                return
+            if ref.kind == CursorKind.PARM_DECL:
+                pfun = ref.semantic_parent
+                if (
+                    pfun is not None
+                    and pfun.kind == CursorKind.FUNCTION_DECL
+                    and not pfun.is_definition()
+                ):
+                    return
+            if not in_main_file(node):
+                return
+            n = (ref.spelling or node.spelling or "").strip()
+            if not n:
+                return
+            func = _enclosing_function_name(ref)
+            k = _var_key_for_decl(func, n)
+            if k not in c_types and ref.type.spelling:
+                c_types[k] = ref.type.spelling
+            if _decl_ref_is_assign_lhs(node, parent):
+                site_lists[k].append(
+                    {"line": int(node.location.line), "role": "write"}
+                )
+            else:
+                site_lists[k].append(
+                    {"line": int(node.location.line), "role": "read"}
+                )
+
+        for c in node.get_children():
+            visit(c, node)
+
+    visit(tu.cursor)
+
+    out: dict[str, Any] = {}
+    for k, sl in site_lists.items():
+        out[k] = {
+            "c_type": c_types.get(k, ""),
+            "sites": sorted(sl, key=lambda s: (s["line"], s["role"])),
+        }
+    return out
+
 
 def count_variables(filename: str) -> Counter:
     index = Index.create()
@@ -71,8 +206,51 @@ def count_variables(filename: str) -> Counter:
     # print(f"Finished counting variables in {filename}. Total distinct variables: {len(counts)}\n\n\n\n")
     return counts
 
+
+def function_return_types(filename: str) -> dict[str, str]:
+    """
+    Maps each function defined in the main file to its C return type spelling (as clang reports it).
+    Used as input for LLM / tenjin `fn_return_type` guidance (Rust types are inferred separately).
+    """
+    index = Index.create()
+
+    args = ["-x", "c", "-std=c11", *_sdk_args()]
+    tu = index.parse(filename, args=args)
+    if tu.diagnostics:
+        print("=== clang diagnostics ===")
+        for d in tu.diagnostics:
+            print(d)
+        print("=========================")
+    out: dict[str, str] = {}
+
+    main_file = Path(tu.spelling).resolve()
+
+    def in_main_file(cur: Cursor) -> bool:
+        if not cur.location.file:
+            return False
+        try:
+            return Path(cur.location.file.name).resolve() == main_file
+        except OSError:
+            return False
+
+    def visit(node: Cursor) -> None:
+        if (
+            node.kind == CursorKind.FUNCTION_DECL
+            and in_main_file(node)
+            and node.is_definition()
+        ):
+            name = node.spelling
+            if name:
+                out[name] = node.result_type.spelling
+        for child in node.get_children():
+            visit(child)
+
+    visit(tu.cursor)
+    return out
+
 if __name__ == "__main__":
     # Only runs when you execute: python src/variable_counts.py
     sample = (Path(__file__).resolve().parent / ".." / "c_samples" / "02_gcd_lcm.c").resolve()
     print("Parsing:", sample)
-    print(count_variables(str(sample)))
+    print("variable counts:", count_variables(str(sample)))
+    print("function return types:", function_return_types(str(sample)))
