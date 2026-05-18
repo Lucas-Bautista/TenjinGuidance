@@ -37,6 +37,17 @@ flowchart TB
 
 See [src/README.md](src/README.md) for module-level detail.
 
+### Clone sibling repositories
+
+From your parent directory (alongside TenjinGuidance):
+
+```bash
+git clone git@github.com:Aarno-Labs/tenjin.git
+git clone git@github.com:DARPA-TRACTOR-Program/PUBLIC-Test-Corpus.git
+```
+
+The corpus checkout must be named `PUBLIC-Test-Corpus` so paths in `codebases/codebases.txt` resolve correctly.
+
 ## Setup
 
 ### 1. Tenjin
@@ -76,22 +87,22 @@ Default paths in `codebases/codebases.txt` are **relative** to that file and ass
 
 ## Running
 
-From `TenjinGuidance/` with the venv activated:
+From `TenjinGuidance/` with the venv activated (`python3` if `python` is not on your PATH):
 
 ```bash
 # Guided pipeline (default): analyze C → LLM → Tenjin → cargo check (up to 3 attempts)
-python src/guidance.py
+python3 src/guidance.py
 # same as:
-python src/guidance.py --guided
+python3 src/guidance.py --guided
 
 # Variable counts only (no LLM, no Tenjin)
-python src/guidance.py --analyze-only
+python3 src/guidance.py --analyze-only
 
 # Baseline Tenjin on codebases.txt targets, no LLM guidance
-python src/guidance.py --tenjinize-only
+python3 src/guidance.py --tenjinize-only
 
 # Print metrics for a past run
-python src/guidance.py --print-metrics tenjin_results/file_0_attempt_1/final/main
+python3 src/guidance.py --print-metrics tenjin_results/file_0_attempt_1/final/main
 ```
 
 Custom targets: pass `--codebases path/to/list.txt` (one path per line; `#` comments and blank lines ignored; relative paths resolve from the list file’s directory).
