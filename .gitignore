@@ -1,0 +1,8 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+tenjin_results/
+tenjin_baseline/
+tenjin_results_*/
+basic_tenjin_results/

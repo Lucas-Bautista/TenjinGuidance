@@ -1,6 +1,14 @@
-/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/004_nineality_sieve/test_case
-/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/006_static_alias/test_case
-/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/007_errno_pow/test_case
-/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/008_long_run/test_case
-/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/009_stack_buffer_overflow/test_case
-/Users/lucasbautista/Documents/UROP/PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/010_integer_overflow/test_case
+# C translation targets for the guided pipeline (guidance.py --guided).
+# Paths are resolved relative to this file's directory unless absolute.
+#
+# Requires this layout (parent folder name is arbitrary):
+#   <parent>/Tractor/
+#   <parent>/PUBLIC-Test-Corpus/
+#   <parent>/tenjin/
+
+../../PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/004_nineality_sieve/test_case
+../../PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/006_static_alias/test_case
+../../PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/007_errno_pow/test_case
+../../PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/008_long_run/test_case
+../../PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/009_stack_buffer_overflow/test_case
+../../PUBLIC-Test-Corpus/Public-Tests/B01_synthetic/010_integer_overflow/test_case

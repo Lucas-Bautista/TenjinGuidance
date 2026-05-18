@@ -3,11 +3,32 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+import sys
 from pathlib import Path
 from typing import Any, Iterable
 from variable_counts import count_variables, function_return_types, variable_dataflow_sites
 from prompt import prompt
+from translation_metrics import (
+    composite_translation_score,
+    format_translation_report,
+    static_rust_metrics,
+)
 import subprocess
+
+_TRACTOR_ROOT = Path(__file__).resolve().parents[1]
+_UROP_ROOT = _TRACTOR_ROOT.parent
+_TENJIN_CLI = _UROP_ROOT / "tenjin" / "cli"
+_GUIDED_RESULTS_ROOT = _TRACTOR_ROOT / "tenjin_results"
+_BASELINE_RESULTS_ROOT = _TRACTOR_ROOT / "tenjin_baseline"
+
+
+def _ensure_tenjin_cli() -> None:
+    if not (_TENJIN_CLI / "10j").exists():
+        raise FileNotFoundError(
+            f"Tenjin CLI not found at {_TENJIN_CLI}. "
+            "Expected sibling repo: <parent>/tenjin/ next to Tractor/"
+        )
+
 
 def _read_codebases_list(codebases_txt: Path) -> list[Path]:
     """
@@ -36,14 +57,24 @@ def _iter_c_files(root: Path) -> Iterable[Path]:
         yield from root.rglob("*.c")
 
 
+def _llm_record_dir(results_dir: Path) -> Path:
+    """
+    Directory for LLM prompt/response logs, kept *beside* Tenjin's resultsdir so
+    ``10j translate`` still sees an empty resultsdir until it runs (Tenjin requires
+    empty or ``--reset-resultsdir``).
+    """
+    return results_dir.parent / f"{results_dir.name}__tractor_llm"
+
+
 def _run_10j_translate(codebase: Path, resultsdir: Path, guidance: str | None) -> None:
     """
     Runs:
-      10j translate --codebase <codebase> --resultsdir <resultsdir>
+      10j translate --reset-resultsdir --codebase <codebase> --resultsdir <resultsdir>
     """
     cmd = [
         "./10j",
         "translate",
+        "--reset-resultsdir",
         "--codebase",
         str(codebase),
         "--resultsdir",
@@ -54,8 +85,8 @@ def _run_10j_translate(codebase: Path, resultsdir: Path, guidance: str | None) -
         cmd.extend(["--guidance", guidance])
 
     print(f"Running command: {' '.join(cmd)}")
-    # check=True -> raises CalledProcessError if 10j fails
-    subprocess.run(cmd, check=True, cwd=Path("/Users/lucasbautista/Documents/UROP/tenjin/cli"))
+    _ensure_tenjin_cli()
+    subprocess.run(cmd, check=True, cwd=_TENJIN_CLI)
 
 
 def _cargo_check(project_dir: Path) -> tuple[bool, str]:
@@ -119,24 +150,139 @@ def _print_counts(file_path: Path, c: Counter, max_items: int | None) -> list[tu
 
     return items
 
-def tenjinize():
-    # We run tenjin on all the files inside of the codebases: no guidance
-    codebases_txt = Path("/Users/lucasbautista/Documents/UROP/Tractor/codebases/codebases.txt")
+def _attempt_root_for_metrics_target(p: Path) -> Path | None:
+    """Resolve tenjin_results/.../file_N_attempt_M from final/main or translation_metrics.json."""
+    p = p.resolve()
+    if p.is_file() and p.name == "translation_metrics.json":
+        return p.parent
+    if p.is_dir() and p.name.startswith("file_") and "_attempt_" in p.name:
+        return p
+    if p.is_dir() and p.name == "main" and p.parent.name == "final":
+        return p.parent.parent
+    return None
+
+
+def _print_llm_inputs_sidebar(p: Path) -> None:
+    """If this metrics path belongs to a guidance attempt, list recorded LLM / guidance files."""
+    root = _attempt_root_for_metrics_target(p)
+    if root is None:
+        return
+    candidates: list[Path] = []
+    legacy = root / "llm_inputs"
+    if legacy.is_dir():
+        candidates.append(legacy)
+    modern = _llm_record_dir(root)
+    if modern.is_dir() and modern not in candidates:
+        candidates.append(modern)
+    if not candidates:
+        return
+    print("-" * 72)
+    print("LLM inputs & Tenjin guidance (recorded before `10j translate` for this attempt)")
+    for llm in candidates:
+        names = sorted(f.name for f in llm.iterdir() if f.is_file())
+        if not names:
+            continue
+        print(f"  {llm}")
+        for n in names:
+            print(f"    {n}")
+    print("-" * 72)
+
+
+def cmd_print_metrics(paths: list[Path], metrics_title: str | None) -> int:
+    """
+    Print translation metric reports without running the LLM / Tenjin pipeline.
+
+    Each path may be:
+      - A Cargo project directory (typically .../final/main) — metrics are recomputed via
+        `cargo clippy` and the caveman line scan.
+      - A saved translation_metrics.json — metrics are loaded as-is (no clippy rerun);
+        composite_score is added if missing.
+
+    When the path matches a guidance run, a footer lists LLM log dirs next to the report:
+    ``<attempt>__tractor_llm/`` (current) or legacy ``<attempt>/llm_inputs/``. Open ``*_user.txt``
+    for full prompts and ``guidance_to_tenjin.json`` for JSON passed to Tenjin.
+    """
+    if not paths:
+        print("error: pass at least one path after --print-metrics", file=sys.stderr)
+        return 2
+    for idx, raw in enumerate(paths):
+        p = raw.expanduser().resolve()
+        if p.is_file() and p.suffix == ".json":
+            metrics: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
+            if "composite_translation_score" not in metrics:
+                metrics["composite_translation_score"] = composite_translation_score(
+                    metrics
+                )
+            title = (
+                metrics_title
+                if metrics_title and len(paths) == 1
+                else f"Saved metrics  ({p})"
+            )
+            cargo_ok = metrics.get("cargo_check_ok")
+            if isinstance(cargo_ok, str):
+                cargo_ok = cargo_ok.lower() == "true"
+            elif cargo_ok is not None:
+                cargo_ok = bool(cargo_ok)
+            print(
+                format_translation_report(
+                    metrics, title=title, cargo_check_ok=cargo_ok
+                )
+            )
+            _print_llm_inputs_sidebar(p)
+        elif p.is_dir():
+            metrics = static_rust_metrics(p)
+            metrics["composite_translation_score"] = composite_translation_score(
+                metrics
+            )
+            title = (
+                metrics_title
+                if metrics_title and len(paths) == 1
+                else f"Fresh metrics  ({p})"
+            )
+            ok, _ = _cargo_check(p)
+            print(
+                format_translation_report(metrics, title=title, cargo_check_ok=ok)
+            )
+            _print_llm_inputs_sidebar(p)
+        else:
+            print(f"error: not a directory or .json file: {p}", file=sys.stderr)
+            return 1
+        if idx + 1 < len(paths):
+            print()
+    return 0
+
+
+def tenjinize(codebases_txt: Path | None = None) -> int:
+    """Run Tenjin on codebases listed in codebases.txt with no LLM guidance."""
+    if codebases_txt is None:
+        codebases_txt = _TRACTOR_ROOT / "codebases" / "codebases.txt"
     roots = _read_codebases_list(codebases_txt)
     if not roots:
         print(f"No paths found in {codebases_txt}")
         return 0
-    
+
+    print(f"Tractor: baseline Tenjin (no guidance) for {len(roots)} codebase(s).")
+    out_root = _BASELINE_RESULTS_ROOT
     for file_num, root in enumerate(roots):
         if not root.exists():
             print(f"[skip] does not exist: {root}")
             continue
 
-        _run_10j_translate(str(root), Path(f"/Users/lucasbautista/Documents/UROP/Tractor/tenjin_results/file_{file_num}_without_guidance"), None)
+        results_dir = out_root / f"file_{file_num}_without_guidance"
+        _run_10j_translate(root, results_dir, None)
+        print(f"Ran tenjin on {root}")
+    return 0
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Run variable counts over all .c files under paths listed in codebases/codebases.txt."
+        description="Tractor: C analysis and Tenjin translation with optional LLM guidance.",
+        epilog=(
+            "Modes (if none of --guided / --tenjinize-only / --analyze-only is given, --guided is used):\n"
+            "  --guided          LLM + Tenjin → tenjin_results/\n"
+            "  --tenjinize-only  Tenjin only  → tenjin_baseline/\n"
+            "  --analyze-only    Variable counts only, no Tenjin"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument(
         "--codebases",
@@ -150,12 +296,64 @@ def main() -> int:
         default=None,
         help="Only print the top N keys per file (default: print all).",
     )
-    ap.add_argument(
-        "--json",
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--guided",
         action="store_true",
-        help="Emit JSON instead of human-readable output.",
+        help="Run the LLM + Tenjin guided translation pipeline.",
+    )
+    mode.add_argument(
+        "--tenjinize-only",
+        action="store_true",
+        help=(
+            "Run Tenjin without LLM guidance (same codebase list as --codebases), then exit."
+        ),
+    )
+    mode.add_argument(
+        "--analyze-only",
+        action="store_true",
+        help="Only print variable counts (no LLM, no Tenjin).",
+    )
+    ap.add_argument(
+        "--print-metrics",
+        nargs="+",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Only print translation metric reports, then exit. Each PATH is either a "
+            "Cargo tree (e.g. tenjin_results/.../final/main) to recompute, or a "
+            "translation_metrics.json file to display saved numbers."
+        ),
+    )
+    ap.add_argument(
+        "--metrics-title",
+        type=str,
+        default=None,
+        help="Optional report title when exactly one --print-metrics target is given.",
     )
     args = ap.parse_args()
+
+    _MODE_FLAGS = ("--guided", "--tenjinize-only", "--analyze-only")
+    
+    if any(f in sys.argv for f in _MODE_FLAGS):
+        run_guided = args.guided
+        run_analyze_only = args.analyze_only
+    else:
+        # No mode flag: default to guided (not baseline Tenjin).
+        run_guided = True
+        run_analyze_only = False
+
+    if args.print_metrics:
+        return cmd_print_metrics(list(args.print_metrics), args.metrics_title)
+
+    if args.tenjinize_only:
+        print("Tractor mode: baseline Tenjin (--tenjinize-only)", flush=True)
+        return tenjinize(args.codebases)
+
+    if run_analyze_only:
+        print("Tractor mode: analyze only (--analyze-only)", flush=True)
+    elif run_guided:
+        print("Tractor mode: guided (LLM + Tenjin)", flush=True)
 
     codebases_txt: Path = args.codebases
     if not codebases_txt.exists():
@@ -183,7 +381,7 @@ def main() -> int:
                 print(f"[error] {c_file}: {e}")
                 continue
 
-            if args.json:
+            if run_guided:
                 # JSON-safe shape: list of entries, keys stringified if needed
                 entries = [
                     {"key": str(k), "count": int(v)} for (k, v) in counts.most_common(args.max_items or None)
@@ -191,6 +389,7 @@ def main() -> int:
                 json_out.append(
                     {
                         "file": str(c_file),
+                        "codebase": str(root.resolve()),
                         "distinct_keys": int(len(counts)),
                         "total_occurrences": int(sum(counts.values())),
                         "counts": entries,
@@ -199,10 +398,19 @@ def main() -> int:
                     }
                 )
             else:
-                listed = _print_counts(c_file, counts, args.max_items)
+                _print_counts(c_file, counts, args.max_items)
 
-        if args.json:
-            print(json.dumps(json_out, indent=2, sort_keys=False))
+    if run_analyze_only:
+        return 0
+
+    if not json_out:
+        print(
+            "error: --guided found no .c files to analyze (check codebases.txt paths).",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"Tractor: guided pipeline for {len(json_out)} translation unit(s).")
 
         # Now we want to prompt the LLM with each file, and its corresponding JSON, and see the corresponding RUST
         # types that it comes up with
@@ -218,16 +426,11 @@ def main() -> int:
     #   "fn_return_c_types": { "function_name": "c_return_type_spelling", ... }
     #   "variable_dataflow": { "func:var" | "GLOBAL:var": { "c_type": str, "sites": [ { "line", "role" }, ... ] } }
     # Prompt used to get the corresponding Rust types for each variable, based on the variable counts JSON that we got from count_variables. We will also have a second prompt to get the mutability of each variable, since that is also important guidance for tenjin.
-    type_prompt_path = Path("../prompts/guidance_prompt.txt")
+    type_prompt_path = _TRACTOR_ROOT / "prompts" / "guidance_prompt.txt"
+    mut_prompt_path = _TRACTOR_ROOT / "prompts" / "mutability_prompt.txt"
+    fn_return_type_prompt_path = _TRACTOR_ROOT / "prompts" / "fn_return_type_prompt.txt"
 
-    # Prompt used to get the mutability of each variable, since that is also important guidance for tenjin. We can reuse the same variable counts JSON for this second prompt, since it also just asks about variable mutability and doesn't require any different information than the first prompt. 
-    # This is separate from the type_prompt because we want to keep the guidance as modular as possible, so that we can easily add new types of guidance in the future without having to change the existing prompts or the way we call them. For example, if we wanted to add a prompt that asks about 
-    # variable lifetimes, we could just create a new lifetime_prompt.txt and call prompt() with that new prompt and the same counts JSON.
-    mut_prompt_path = Path("../prompts/mutability_prompt.txt")
-    # Maps each function to a Rust return type (Tenjin key `fn_return_type`), from C return spellings in `fn_return_c_types`.
-    fn_return_type_prompt_path = Path("../prompts/fn_return_type_prompt.txt")
-
-    # If --json is not provided, then json_out will be empty and this loop will do nothing, which is fine because the LLM prompting relies on the JSON output to provide it with the variable counts guidance.
+    # If --guided is not provided, then json_out will be empty and this loop will do nothing, which is fine because the LLM prompting relies on the JSON output to provide it with the variable counts guidance.
    
     # -----------------------------------------------LLM PROMPTING AND TENJIN GUIDANCE LOGIC STARTS HERE------------------------------------------------------
     for file_num, program_info in enumerate(json_out):
@@ -271,6 +474,9 @@ def main() -> int:
 
         compile_errors: str | None = None
         for attempt in range(1, 4):
+            results_dir = _GUIDED_RESULTS_ROOT / f"file_{file_num}_attempt_{attempt}"
+            llm_record_dir = _llm_record_dir(results_dir)
+
             local_variable_counts_str = json.dumps(local_variable_counts, indent=2, sort_keys=False)
             global_variable_counts_str = json.dumps(global_variable_counts, indent=2, sort_keys=False)
 
@@ -281,18 +487,24 @@ def main() -> int:
                 type_prompt_path,
                 local_variable_counts_str,
                 compile_errors,
+                record_dir=llm_record_dir,
+                record_name="01_types_local",
             )
             global_variable_responses = prompt(
                 code_sample_path,
                 type_prompt_path,
                 global_variable_counts_str,
                 compile_errors,
+                record_dir=llm_record_dir,
+                record_name="02_types_global",
             )
             is_mutable_responses = prompt(
                 code_sample_path,
                 mut_prompt_path,
                 local_variable_counts_str,
                 compile_errors,
+                record_dir=llm_record_dir,
+                record_name="03_mutability",
             )  # we can reuse the same counts JSON for this second prompt, since it also just asks about variable mutability
 
             fn_return_c_json = json.dumps(fn_return_c_types, indent=2, sort_keys=False)
@@ -304,6 +516,8 @@ def main() -> int:
                     compile_errors,
                     data_heading="Function return types (C, from clang)",
                     json_key="fn_return_c_types",
+                    record_dir=llm_record_dir,
+                    record_name="04_fn_return_type",
                 )
                 _raw = fn_return_type_responses[0][1]
                 if isinstance(_raw, dict):
@@ -363,9 +577,17 @@ def main() -> int:
 
             print(f"Final guidance dict for {code_sample_path}:\n{json.dumps(guidance, indent=2, sort_keys=False)}\n\n")
 
+            llm_record_dir.mkdir(parents=True, exist_ok=True)
+            (llm_record_dir / "guidance_to_tenjin.json").write_text(
+                json.dumps(guidance, indent=2, sort_keys=False), encoding="utf-8"
+            )
+            if compile_errors:
+                (llm_record_dir / "compile_errors_in_prompt.txt").write_text(
+                    compile_errors, encoding="utf-8"
+                )
+
             # This function wil run tenjin with the provided guidance (the variable counts and the LLM's inferred Rust types based on those counts), and save the results in a separate directory for each file.
-            results_dir = Path(f"/Users/lucasbautista/Documents/UROP/Tractor/tenjin_results/file_{file_num}_attempt_{attempt}")
-            _run_10j_translate(program_info["file"], results_dir, json.dumps(guidance, indent=2, sort_keys=False))
+            _run_10j_translate(Path(program_info["codebase"]), results_dir, json.dumps(guidance, indent=2, sort_keys=False))
 
             cargo_dir = results_dir / "final" / "main"
             if not cargo_dir.exists():
@@ -374,11 +596,33 @@ def main() -> int:
                 continue
 
             ok, output = _cargo_check(cargo_dir)
+            metrics_summary: dict[str, Any] = {}
+            try:
+                metrics = static_rust_metrics(cargo_dir)
+                metrics["composite_translation_score"] = composite_translation_score(metrics)
+                metrics["cargo_check_ok"] = ok
+                metrics_summary = dict(metrics)
+                metrics_path = results_dir / "translation_metrics.json"
+                metrics_path.write_text(
+                    json.dumps(metrics_summary, indent=2, sort_keys=False, default=str),
+                    encoding="utf-8",
+                )
+                title = f"Translation metrics  (file_{file_num} attempt {attempt})  {cargo_dir.name}"
+                report = format_translation_report(
+                    metrics, title=title, cargo_check_ok=ok
+                )
+                print(report)
+            except Exception as ex:
+                print(f"[attempt {attempt}] translation metrics skipped: {ex}")
+
             if ok:
                 print(f"[attempt {attempt}] cargo check OK for {cargo_dir}")
                 break
 
             compile_errors = output
+            if cargo_dir.exists():
+                err_path = llm_record_dir / "cargo_check_stderr.txt"
+                err_path.write_text(output, encoding="utf-8")
             print(f"[attempt {attempt}] cargo check failed for {cargo_dir}\n{output}")
         else:
             print(f"[give up] cargo check failed after 3 attempts for {code_sample_path}")

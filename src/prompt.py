@@ -33,6 +33,40 @@ def clean_json_response(text: str) -> str:
 
     return t
 
+def _write_llm_record(
+    record_dir: Path,
+    record_name: str,
+    *,
+    code_path: Path,
+    prompt_path: Path,
+    data_heading: str,
+    json_key: str,
+    system_prompt: str,
+    user_prompt: str,
+    model_names_used: list[str],
+    responses: list[tuple[str, dict]],
+) -> None:
+    record_dir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "code_path": str(code_path.resolve()),
+        "prompt_path": str(prompt_path.resolve()),
+        "data_heading": data_heading,
+        "json_key": json_key,
+        "models": model_names_used,
+        "record_name": record_name,
+    }
+    (record_dir / f"{record_name}_meta.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=False), encoding="utf-8"
+    )
+    (record_dir / f"{record_name}_system.txt").write_text(system_prompt, encoding="utf-8")
+    (record_dir / f"{record_name}_user.txt").write_text(user_prompt, encoding="utf-8")
+    serializable = [{"model": m, "parsed_json": d} for m, d in responses]
+    (record_dir / f"{record_name}_response.json").write_text(
+        json.dumps(serializable, indent=2, sort_keys=False, default=str),
+        encoding="utf-8",
+    )
+
+
 def prompt(
     code_path: Path,
     prompt_path: Path,
@@ -41,6 +75,8 @@ def prompt(
     *,
     data_heading: str = "Variables",
     json_key: str = "counts",
+    record_dir: Path | None = None,
+    record_name: str = "llm_call",
 ) -> list[tuple[str, dict]]:
     # Load prompt as string
     system_prompt = prompt_path.read_text(encoding="utf-8")
@@ -96,6 +132,20 @@ def prompt(
         print(f"Guessed values {json_str} \n")
         data = json.loads(json_str)
         organized_responses.append((model, data))
+
+    if record_dir is not None:
+        _write_llm_record(
+            record_dir,
+            record_name,
+            code_path=code_path,
+            prompt_path=prompt_path,
+            data_heading=data_heading,
+            json_key=json_key,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_names_used=list(model_names),
+            responses=organized_responses,
+        )
     return organized_responses
 
 

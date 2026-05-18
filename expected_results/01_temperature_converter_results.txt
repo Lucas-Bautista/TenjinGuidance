@@ -1,9 +1,0 @@
-fahr_start: double : 3
-fahr_end: double: 3
-step: double: 2
-fahr: double: 5
-celsius: double: 4
-kelvin: double: 3
-row_count: int: 3
-avg_fahr: double: 3
-avg_celsius: double: 2
