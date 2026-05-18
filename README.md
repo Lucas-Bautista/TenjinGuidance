@@ -1,6 +1,6 @@
-# Tractor
+# TenjinGuidance
 
-Tractor orchestrates **LLM-guided C→Rust translation** by analyzing C code, asking Claude for type and mutability hints, and passing that guidance to [Tenjin](../tenjin/). It then checks translated Rust with `cargo check` and records quality metrics.
+TenjinGuidance orchestrates **LLM-guided C→Rust translation** by analyzing C code, asking Claude for type and mutability hints, and passing that guidance to [Tenjin](../tenjin/). It then checks translated Rust with `cargo check` and records quality metrics. The CLI still prints **Tractor** in mode messages for brevity.
 
 ## Repository layout
 
@@ -8,7 +8,7 @@ Place these three directories as **siblings** under one parent (the parent name 
 
 ```
 <parent>/
-  Tractor/                 # this project
+  TenjinGuidance/         # this project
   tenjin/                  # 10j CLI + c2rust fork
   PUBLIC-Test-Corpus/      # benchmark C projects
 ```
@@ -16,13 +16,13 @@ Place these three directories as **siblings** under one parent (the parent name 
 ```mermaid
 flowchart TB
   subgraph parent [parent folder]
-    Tractor[Tractor]
+    TenjinGuidance[TenjinGuidance]
     Tenjin[tenjin]
     Corpus[PUBLIC-Test-Corpus]
   end
-  Corpus -->|codebases.txt| Tractor
-  Tractor -->|"./10j translate"| Tenjin
-  Tractor -->|Anthropic API| LLM[Claude]
+  Corpus -->|codebases.txt| TenjinGuidance
+  TenjinGuidance -->|"./10j translate"| Tenjin
+  TenjinGuidance -->|Anthropic API| LLM[Claude]
   Tenjin --> Results[tenjin_results/]
 ```
 
@@ -46,12 +46,12 @@ cd ../tenjin/cli
 ./10j provision
 ```
 
-Add `tenjin/cli` to your `PATH`, or Tractor will invoke `./10j` from that directory automatically (sibling layout required).
+Add `tenjin/cli` to your `PATH`, or TenjinGuidance will invoke `./10j` from that directory automatically (sibling layout required).
 
-### 2. Tractor Python environment
+### 2. TenjinGuidance Python environment
 
 ```bash
-cd Tractor
+cd TenjinGuidance
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -76,7 +76,7 @@ Default paths in `codebases/codebases.txt` are **relative** to that file and ass
 
 ## Running
 
-From `Tractor/` with the venv activated:
+From `TenjinGuidance/` with the venv activated:
 
 ```bash
 # Guided pipeline (default): analyze C → LLM → Tenjin → cargo check (up to 3 attempts)
@@ -108,7 +108,7 @@ Each Tenjin run produces intermediate C transforms under `c_*` prefixes and fina
 
 ## Guidance passed to Tenjin
 
-Tractor builds a JSON object with keys Tenjin understands (`vars_of_type`, `declspecs_of_type`, `vars_mut`, `fn_return_type`). See [tenjin/docs/USE.md](../tenjin/docs/USE.md#guidance) and [src/README.md](src/README.md).
+TenjinGuidance builds a JSON object with keys Tenjin understands (`vars_of_type`, `declspecs_of_type`, `vars_mut`, `fn_return_type`). See [tenjin/docs/USE.md](../tenjin/docs/USE.md#guidance) and [src/README.md](src/README.md).
 
 ## Tests
 
@@ -120,4 +120,4 @@ pytest tests/
 
 - [Tenjin README](../tenjin/README.md)
 - [Tenjin user docs](../tenjin/docs/USE.md)
-- [Tractor src/README.md](src/README.md)
+- [TenjinGuidance src/README.md](src/README.md)

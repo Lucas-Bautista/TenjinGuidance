@@ -26,7 +26,7 @@ def _ensure_tenjin_cli() -> None:
     if not (_TENJIN_CLI / "10j").exists():
         raise FileNotFoundError(
             f"Tenjin CLI not found at {_TENJIN_CLI}. "
-            "Expected sibling repo: <parent>/tenjin/ next to Tractor/"
+            "Expected sibling repo: <parent>/tenjin/ next to TenjinGuidance/"
         )
 
 
@@ -288,7 +288,7 @@ def main() -> int:
         "--codebases",
         type=Path,
         default=(Path(__file__).resolve().parents[1] / "codebases" / "codebases.txt"),
-        help="Path to codebases.txt (default: Tractor/codebases/codebases.txt)",
+        help="Path to codebases.txt (default: TenjinGuidance/codebases/codebases.txt)",
     )
     ap.add_argument(
         "--max-items",

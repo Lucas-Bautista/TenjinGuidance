@@ -1,7 +1,7 @@
 """
 Tests for variable_counts.variable_dataflow_sites (clang def/ref roles).
 
-Requires macOS + Homebrew libclang (same as other Tractor clang tests).
+Requires macOS + Homebrew libclang (same as other TenjinGuidance clang tests).
 """
 
 from __future__ import annotations

@@ -3,12 +3,12 @@ Live integration: compare clang C return types vs the LLM’s `fn_return_type` p
 
 Requires:
   - macOS (libclang + xcrun, same as variable_counts)
-  - ANTHROPIC_API_KEY: in the environment or `Tractor/.env` (python-dotenv on import)
+  - ANTHROPIC_API_KEY: in the environment or `TenjinGuidance/.env` (python-dotenv on import)
   - TRACTOR_RUN_LIVE_LLM=1 so `unittest discover` does not call the API unless you opt in
 
 Run and read stdout (opt-in live LLM):
-  cd Tractor && TRACTOR_RUN_LIVE_LLM=1 .venv/bin/python -m unittest tests.test_fn_return_prompt_effectiveness -v
-  cd Tractor && .venv/bin/python tests/test_fn_return_prompt_effectiveness.py
+  cd TenjinGuidance && TRACTOR_RUN_LIVE_LLM=1 .venv/bin/python -m unittest tests.test_fn_return_prompt_effectiveness -v
+  cd TenjinGuidance && .venv/bin/python tests/test_fn_return_prompt_effectiveness.py
 """
 
 from __future__ import annotations

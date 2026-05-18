@@ -1,4 +1,4 @@
-# Tractor `src/` — pipeline implementation
+# TenjinGuidance `src/` — pipeline implementation
 
 ## Module map
 
@@ -56,7 +56,7 @@ sequenceDiagram
 ./10j translate --reset-resultsdir --codebase <path> --resultsdir <dir> --guidance '<json>'
 ```
 
-Paths are resolved from Tractor’s location: Tenjin is expected at `<parent>/tenjin/cli` (sibling of `Tractor/`).
+Paths are resolved from TenjinGuidance’s location: Tenjin is expected at `<parent>/tenjin/cli` (sibling of `TenjinGuidance/`).
 
 5. **Validation loop** — Up to three attempts per file. After each translation, `cargo check` runs on `resultsdir/final/main`. On failure, stderr is fed back into the next LLM round via `compile_errors`. Metrics are saved to `translation_metrics.json`.
 
@@ -75,7 +75,7 @@ Tenjin guidance keys are documented in [tenjin/docs/USE.md](../../tenjin/docs/US
 
 ## CLI reference
 
-Run from `Tractor/` (or ensure `src/` is on `PYTHONPATH`):
+Run from `TenjinGuidance/` (or ensure `src/` is on `PYTHONPATH`):
 
 | Flag | Effect |
 |------|--------|
@@ -108,7 +108,7 @@ Recorded files under `file_N_attempt_M__tractor_llm/`:
 
 ## Tests
 
-From `Tractor/`:
+From `TenjinGuidance/`:
 
 ```bash
 pytest tests/
@@ -126,7 +126,7 @@ pytest tests/
 In `guidance.py`:
 
 ```python
-_TRACTOR_ROOT = Path(__file__).resolve().parents[1]   # Tractor/
+_TRACTOR_ROOT = Path(__file__).resolve().parents[1]   # TenjinGuidance/
 _UROP_ROOT = _TRACTOR_ROOT.parent                   # <parent>/
 _TENJIN_CLI = _UROP_ROOT / "tenjin" / "cli"
 ```

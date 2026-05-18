@@ -2,7 +2,7 @@
 Unit tests for variable_counts.function_return_types.
 
 They require a macOS SDK (xcrun) and libclang at the path in variable_counts.Config
-(the same as normal Tractor / clang use).
+(the same as normal TenjinGuidance / clang use).
 
 Tests for `return_types_complex.c` and `return_types_edge.c` compare the full
 mapping to exact spelling strings from libclang; if Apple LLVM updates pretty-

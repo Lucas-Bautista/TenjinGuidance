@@ -1,7 +1,7 @@
 /*
  * Heavier coverage for function_return_types: stdint, structs, enums,
  * pointer / qualified-pointer, float, and pointer-to-function return types.
- * Intentionally C11, same mode as the rest of Tractor.
+ * Intentionally C11, same mode as the rest of TenjinGuidance.
  */
 #include <stddef.h>
 #include <stdint.h>

@@ -1,9 +1,9 @@
 """
-Static Rust quality metrics for a translated Cargo project (Tractor-side).
+Static Rust quality metrics for a translated Cargo project (TenjinGuidance-side).
 
 Logic mirrors Tenjin's cli/static_measurements_rust.py (caveman line scan +
 `cargo clippy --message-format=json`) without importing Tenjin's hermetic stack,
-so it runs from the Tractor repo with a normal `cargo` on PATH.
+so it runs from the TenjinGuidance repo with a normal `cargo` on PATH.
 """
 from __future__ import annotations
 

@@ -2,7 +2,7 @@
 # Paths are resolved relative to this file's directory unless absolute.
 #
 # Requires this layout (parent folder name is arbitrary):
-#   <parent>/Tractor/
+#   <parent>/TenjinGuidance/
 #   <parent>/PUBLIC-Test-Corpus/
 #   <parent>/tenjin/
 
