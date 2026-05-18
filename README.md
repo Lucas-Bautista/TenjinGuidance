@@ -119,7 +119,7 @@ Each Tenjin run produces intermediate C transforms under `c_*` prefixes and fina
 
 ## Guidance passed to Tenjin
 
-TenjinGuidance builds a JSON object with keys Tenjin understands (`vars_of_type`, `declspecs_of_type`, `vars_mut`, `fn_return_type`). See [tenjin/docs/USE.md](../tenjin/docs/USE.md#guidance) and [src/README.md](src/README.md).
+TenjinGuidance builds a JSON object with keys Tenjin understands (`vars_of_type`, `declspecs_of_type`, `vars_mut`, `fn_return_type`). See [tenjin/docs/USE.md](https://github.com/Aarno-Labs/tenjin/blob/main/docs/USE.md) and [src/README.md](src/README.md).
 
 ## Tests
 
