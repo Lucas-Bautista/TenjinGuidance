@@ -1,8 +1,7 @@
 """
 Unit tests for variable_counts.function_return_types.
 
-They require a macOS SDK (xcrun) and libclang at the path in variable_counts.Config
-(the same as normal TenjinGuidance / clang use).
+They require a working libclang install (macOS or Linux; see README §3).
 
 Tests for `return_types_complex.c` and `return_types_edge.c` compare the full
 mapping to exact spelling strings from libclang; if Apple LLVM updates pretty-
@@ -19,10 +18,18 @@ _SRC = _TRACTOR_ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from variable_counts import function_return_types  # noqa: E402
+from clang_config import libclang_usable  # noqa: E402
+
+if libclang_usable():
+    from variable_counts import function_return_types  # noqa: E402
+else:
+    function_return_types = None  # type: ignore[misc, assignment]
 
 
-@unittest.skipUnless(sys.platform == "darwin", "function_return_types uses xcrun + macOS SDK")
+@unittest.skipUnless(
+    libclang_usable(),
+    "function_return_types needs libclang (install clang/libclang-dev or set LIBCLANG_PATH)",
+)
 class TestFunctionReturnTypes(unittest.TestCase):
     def test_fixture_includes_only_definitions(self) -> None:
         path = _TRACTOR_ROOT / "tests" / "fixtures" / "return_types_sample.c"

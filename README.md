@@ -68,9 +68,41 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. libclang (macOS)
+### 3. C analysis (libclang) — macOS or Linux
 
-`variable_counts.py` uses libclang with Homebrew LLVM at `/opt/homebrew/opt/llvm/lib` and the macOS SDK via `xcrun`. On Linux, adjust `Config.set_library_path` in `src/variable_counts.py` for your LLVM install.
+TenjinGuidance uses Python `libclang` to analyze `.c` files before LLM guidance. Paths are **auto-detected** on both platforms; override with `LIBCLANG_PATH` in `.env` if needed (see `.env.example`).
+
+#### macOS
+
+```bash
+xcode-select --install          # Command Line Tools (provides xcrun + system headers)
+brew install llvm               # libclang shared library
+```
+
+Auto-detected library paths: `/opt/homebrew/opt/llvm/lib` (Apple Silicon) or `/usr/local/opt/llvm/lib` (Intel).
+
+#### Linux (Debian/Ubuntu)
+
+```bash
+sudo apt update
+sudo apt install -y clang llvm libclang-dev build-essential
+```
+
+Auto-detected paths include `/usr/lib/llvm-*/lib` and locations reported by `llvm-config --libdir`. Ensure `clang` is on your `PATH`.
+
+#### Verify
+
+```bash
+source .venv/bin/activate
+python3 src/guidance.py --analyze-only --max-items 3
+```
+
+You should see a line like `libclang: /usr/lib/llvm-18/lib (linux)` and variable counts for each `.c` file—not `xcrun` errors.
+
+#### Guided / Tenjin runs also need
+
+- **Rust** (`rustup` / `cargo`) for `cargo check` after translation
+- **Tenjin** provisioned (`./10j provision` in `tenjin/cli`) for `--guided` and `--tenjinize-only`
 
 ### 4. API key
 
@@ -126,6 +158,8 @@ TenjinGuidance builds a JSON object with keys Tenjin understands (`vars_of_type`
 ```bash
 pytest tests/
 ```
+
+Clang unit tests run on **macOS and Linux** when `libclang` is installed; they are skipped automatically otherwise.
 
 ## Further reading
 

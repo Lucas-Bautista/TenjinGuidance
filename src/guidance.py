@@ -6,6 +6,16 @@ from collections import Counter
 import sys
 from pathlib import Path
 from typing import Any, Iterable
+
+_TRACTOR_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(_TRACTOR_ROOT / ".env")
+except ImportError:
+    pass
+
+from clang_config import clang_platform_summary
 from variable_counts import count_variables, function_return_types, variable_dataflow_sites
 from prompt import prompt
 from translation_metrics import (
@@ -15,7 +25,6 @@ from translation_metrics import (
 )
 import subprocess
 
-_TRACTOR_ROOT = Path(__file__).resolve().parents[1]
 _UROP_ROOT = _TRACTOR_ROOT.parent
 _TENJIN_CLI = _UROP_ROOT / "tenjin" / "cli"
 _GUIDED_RESULTS_ROOT = _TRACTOR_ROOT / "tenjin_results"
@@ -354,6 +363,9 @@ def main() -> int:
         print("Tractor mode: analyze only (--analyze-only)", flush=True)
     elif run_guided:
         print("Tractor mode: guided (LLM + Tenjin)", flush=True)
+
+    if run_analyze_only or run_guided:
+        print(clang_platform_summary(), flush=True)
 
     codebases_txt: Path = args.codebases
     if not codebases_txt.exists():

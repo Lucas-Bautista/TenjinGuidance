@@ -6,6 +6,7 @@
 |--------|------|
 | `guidance.py` | CLI entry point; orchestrates analysis, LLM calls, `10j translate`, retries |
 | `variable_counts.py` | libclang static analysis: variable counts, dataflow sites, C return types |
+| `clang_config.py` | Cross-platform libclang path and parse flags (macOS / Linux) |
 | `prompt.py` | Anthropic client; assembles prompts; writes `*_user.txt` / `*_response.json` logs |
 | `translation_metrics.py` | Post-translation metrics (line scan + `cargo clippy --message-format=json`) |
 | `convert_expected_results.py` | One-off utility to convert expected-results text to JSON |

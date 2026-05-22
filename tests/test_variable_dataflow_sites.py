@@ -1,7 +1,7 @@
 """
 Tests for variable_counts.variable_dataflow_sites (clang def/ref roles).
 
-Requires macOS + Homebrew libclang (same as other TenjinGuidance clang tests).
+Requires libclang (macOS or Linux; see README §3).
 """
 
 from __future__ import annotations
@@ -15,14 +15,22 @@ _SRC = _TRACTOR_ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from variable_counts import variable_dataflow_sites  # noqa: E402
+from clang_config import libclang_usable  # noqa: E402
+
+if libclang_usable():
+    from variable_counts import variable_dataflow_sites  # noqa: E402
+else:
+    variable_dataflow_sites = None  # type: ignore[misc, assignment]
 
 
 def _roles(df: dict, key: str) -> list[str]:
     return [s["role"] for s in df[key]["sites"]]
 
 
-@unittest.skipUnless(sys.platform == "darwin", "variable_dataflow_sites needs xcrun + macOS SDK")
+@unittest.skipUnless(
+    libclang_usable(),
+    "variable_dataflow_sites needs libclang (install clang/libclang-dev or set LIBCLANG_PATH)",
+)
 class TestVariableDataflowSites(unittest.TestCase):
     def test_assign_and_compound_and_global(self) -> None:
         p = _TRACTOR_ROOT / "tests" / "fixtures" / "dataflow_assign.c"
